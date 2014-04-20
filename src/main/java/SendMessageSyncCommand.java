@@ -16,7 +16,6 @@ import static com.netflix.hystrix.HystrixCommand.Setter.withGroupKey;
  * To change this template use File | Settings | File Templates.
  */
 public class SendMessageSyncCommand extends HystrixCommand<String> {
-    protected static final Logger logger = LoggerFactory.getLogger(SendMessageSyncCommand.class);
 
     private final AmazonSQSClient sqs;
     private final String queueUrl;
@@ -25,8 +24,8 @@ public class SendMessageSyncCommand extends HystrixCommand<String> {
     public SendMessageSyncCommand(String message, String queueUrl, AmazonSQSClient sqs) {
         super(withGroupKey(HystrixCommandGroupKey.Factory.asKey("SendMessageSyncCommand"))
                 .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
-                        .withExecutionIsolationThreadTimeoutInMilliseconds(5000))
-                .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withMaxQueueSize(10)));
+                        .withExecutionIsolationThreadTimeoutInMilliseconds(Constants.SEND_COMMAND_TIMEOUT))
+                .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withCoreSize(Constants.SEND_COMMAND_POOL_SIZE)));
         this.sqs = sqs;
         this.queueUrl = queueUrl;
         this.message = message;
