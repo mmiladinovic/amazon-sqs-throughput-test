@@ -1,3 +1,4 @@
+import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +18,8 @@ public class MessageProducer implements Runnable {
     private final BlockingQueue<SimpleMessage> messageQ;
     private final AtomicInteger counter = new AtomicInteger(0);
 
+    private volatile boolean cancelled;
+
     public MessageProducer(BlockingQueue<SimpleMessage> messageQ) {
         this.messageQ = messageQ;
     }
@@ -24,15 +27,21 @@ public class MessageProducer implements Runnable {
     @Override
     public void run() {
         try {
-            while (true) {
+            while (!cancelled) {
                 counter.incrementAndGet();
                 generateMessage();
             }
         }
         catch (InterruptedException e) {
-            logger.info("bowing out. produced {} messages", counter.get());
             Thread.currentThread().interrupt();
         }
+        finally {
+            logger.info("bowing out. produced {} messages", counter.get());
+        }
+    }
+
+    public void cancel() {
+        this.cancelled = true;
     }
 
     private void generateMessage() throws InterruptedException {

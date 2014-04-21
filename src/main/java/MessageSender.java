@@ -1,19 +1,14 @@
-import com.amazonaws.ClientConfiguration;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
-import com.amazonaws.regions.Region;
-import com.amazonaws.regions.Regions;
-import com.amazonaws.services.sqs.AmazonSQS;
 import com.amazonaws.services.sqs.AmazonSQSClient;
-import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import rx.Observable;
 import rx.Observer;
-import rx.util.functions.Action1;
+import rx.Subscription;
 
-import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -54,8 +49,14 @@ public class MessageSender implements Runnable {
     public void run() {
         try {
             while (!cancelled) {
-                Observable<String> msgId = sendMessage(queue.take());
-                handleSQSResponse(msgId);
+//                Observable<String> msgId = sendMessage(queue.take());
+//                handleSQSResponse(msgId);
+
+                sendMessageSync(queue.take());
+//                List<SimpleMessage> batch = new ArrayList<SimpleMessage>(10);
+//                if (queue.drainTo(batch, 10) > 0) {
+//                    sendMessageBatchSync(batch);
+//                }
             }
         }
         catch (InterruptedException e) {
@@ -63,6 +64,52 @@ public class MessageSender implements Runnable {
         }
         finally {
             logger.info("received total of {} messages. sent to SQS ok {}, error to SQS {}", counter, sentToSQS, errorToSQS);
+        }
+
+    }
+
+    private void sendMessageBatchSync(List<SimpleMessage> batch) throws InterruptedException {
+        int i = counter.addAndGet(batch.size());
+        try {
+            List<String> messagesAsString = new ArrayList<String>(batch.size());
+            for (SimpleMessage message : batch) {
+                messagesAsString.add(mapper.writeValueAsString(message));
+            }
+            SendMessageBatchSyncCommand batchSend = new SendMessageBatchSyncCommand(messagesAsString, queueUrl, sqs);
+            batchSend.run();
+            sentToSQS.addAndGet(batch.size());
+        } catch (JsonProcessingException e) {
+            logger.error("cannot make json out of message.", e);
+        }
+        catch (InterruptedException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            errorToSQS.incrementAndGet();
+            if (i % 100 == 0) {
+                logger.error("exception sending message", e);
+            }
+        }
+    }
+
+    private void sendMessageSync(SimpleMessage message) throws InterruptedException {
+        int i = counter.incrementAndGet();
+        try {
+            String messageAsString = mapper.writeValueAsString(message);
+            SendMessageSyncCommand syncSend = new SendMessageSyncCommand(messageAsString, queueUrl, sqs);
+            syncSend.run();
+            sentToSQS.incrementAndGet();
+        } catch (JsonProcessingException e) {
+            logger.error("cannot make json out of message.", e);
+        }
+        catch (InterruptedException e) {
+            throw e;
+        }
+        catch (Exception e) {
+            errorToSQS.incrementAndGet();
+            if (i % 100 == 0) {
+                logger.error("exception sending message", e);
+            }
         }
 
     }
@@ -80,15 +127,20 @@ public class MessageSender implements Runnable {
     }
 
     private void handleSQSResponse(Observable<String> messageId) {
-        messageId.subscribe(new Observer<String>() {
+        if (messageId == null) {
+            return;
+        }
+        final Subscription s = messageId.subscribe(new Observer<String>() {
             @Override
             public void onCompleted() {
             }
 
             @Override
             public void onError(Throwable e) {
-                // logger.error("problem sending to sqs: "+e.getMessage());
-                errorToSQS.incrementAndGet();
+                int i = errorToSQS.incrementAndGet();
+                if (i % 100 == 0) {
+                    logger.error("problem sending to sqs: ",e);
+                }
             }
 
             @Override
@@ -97,4 +149,9 @@ public class MessageSender implements Runnable {
             }
         });
     }
+
+    public int getMessagesSent() {
+        return sentToSQS.get();
+    }
+
 }
