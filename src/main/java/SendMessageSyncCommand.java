@@ -26,6 +26,7 @@ public class SendMessageSyncCommand extends HystrixCommand<String> {
                 .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
                         .withExecutionIsolationThreadTimeoutInMilliseconds(Constants.SEND_COMMAND_TIMEOUT))
                 .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withCoreSize(Constants.SEND_COMMAND_POOL_SIZE))
+                .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withQueueSizeRejectionThreshold(Constants.BOUND))
                 .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withMaxQueueSize(Constants.BOUND)));
         this.sqs = sqs;
         this.queueUrl = queueUrl;

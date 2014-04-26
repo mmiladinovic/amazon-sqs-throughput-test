@@ -1,4 +1,8 @@
 import com.amazonaws.services.sqs.AmazonSQSClient;
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.Meter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Timer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -23,7 +27,6 @@ public class MessageSender implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(MessageSender.class);
 
     private final BlockingQueue<SimpleMessage> queue;
-    private final BlockingQueue<String> dlq;
     private final String queueUrl;
     private final AmazonSQSClient sqs;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -32,13 +35,22 @@ public class MessageSender implements Runnable {
     private final AtomicInteger sentToSQS = new AtomicInteger(0);
     private final AtomicInteger errorToSQS = new AtomicInteger(0);
 
+    private final Meter messagesDequeuedMeter;
+    private final Meter sentToSQSMeter;
+    private final Meter errorToSQSMeter;
+    private final Timer sqsSendTimer;
+
     private volatile boolean cancelled;
 
-    public MessageSender(String queueUrl, AmazonSQSClient sqs, BlockingQueue<SimpleMessage> queue, BlockingQueue<String> dlq) {
+    public MessageSender(String queueUrl, AmazonSQSClient sqs, BlockingQueue<SimpleMessage> queue, MetricRegistry metricRegistry) {
         this.queue = queue;
-        this.dlq = dlq;
         this.queueUrl = queueUrl;
         this.sqs = sqs;
+
+        messagesDequeuedMeter = metricRegistry.meter("messagesDequeuedMeter");
+        sentToSQSMeter = metricRegistry.meter("sentToSQSMeter");
+        errorToSQSMeter = metricRegistry.meter("errorToSQSMeter");
+        sqsSendTimer = metricRegistry.timer("sqsSendTime");
     }
 
     public void cancel() {
@@ -49,34 +61,37 @@ public class MessageSender implements Runnable {
     public void run() {
         try {
             while (!cancelled) {
-//                Observable<String> msgId = sendMessage(queue.take());
-//                handleSQSResponse(msgId);
+                //sendMessageWithHystrix(queue.take());
+                  // sendMessageSync(queue.take());
+                List<SimpleMessage> batch = new ArrayList<SimpleMessage>(10);
+                if (queue.drainTo(batch, 10) > 0) {
+                    sendMessageBatchSync(batch);
+                }
 
-                sendMessageSync(queue.take());
-//                List<SimpleMessage> batch = new ArrayList<SimpleMessage>(10);
-//                if (queue.drainTo(batch, 10) > 0) {
-//                    sendMessageBatchSync(batch);
-//                }
             }
         }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
         finally {
-            logger.info("received total of {} messages. sent to SQS ok {}, error to SQS {}", counter, sentToSQS, errorToSQS);
+            // logger.info("received total of {} messages. sent to SQS ok {}, error to SQS {}", counter, sentToSQS, errorToSQS);
         }
 
     }
 
     private void sendMessageBatchSync(List<SimpleMessage> batch) throws InterruptedException {
         int i = counter.addAndGet(batch.size());
+        messagesDequeuedMeter.mark(batch.size());
+        Timer.Context timer = null;
         try {
             List<String> messagesAsString = new ArrayList<String>(batch.size());
             for (SimpleMessage message : batch) {
                 messagesAsString.add(mapper.writeValueAsString(message));
             }
             SendMessageBatchSyncCommand batchSend = new SendMessageBatchSyncCommand(messagesAsString, queueUrl, sqs);
+            timer = sqsSendTimer.time();
             batchSend.run();
+            sentToSQSMeter.mark(batch.size());
             sentToSQS.addAndGet(batch.size());
         } catch (JsonProcessingException e) {
             logger.error("cannot make json out of message.", e);
@@ -86,18 +101,26 @@ public class MessageSender implements Runnable {
         }
         catch (Exception e) {
             errorToSQS.incrementAndGet();
+            errorToSQSMeter.mark();
             if (i % 100 == 0) {
                 logger.error("exception sending message", e);
             }
+        }
+        finally {
+            if (timer != null) timer.stop();
         }
     }
 
     private void sendMessageSync(SimpleMessage message) throws InterruptedException {
         int i = counter.incrementAndGet();
+        messagesDequeuedMeter.mark();
+        Timer.Context timer = null;
         try {
             String messageAsString = mapper.writeValueAsString(message);
             SendMessageSyncCommand syncSend = new SendMessageSyncCommand(messageAsString, queueUrl, sqs);
+            timer = sqsSendTimer.time();
             syncSend.run();
+            sentToSQSMeter.mark();
             sentToSQS.incrementAndGet();
         } catch (JsonProcessingException e) {
             logger.error("cannot make json out of message.", e);
@@ -107,23 +130,27 @@ public class MessageSender implements Runnable {
         }
         catch (Exception e) {
             errorToSQS.incrementAndGet();
+            errorToSQSMeter.mark();
             if (i % 100 == 0) {
                 logger.error("exception sending message", e);
             }
         }
+        finally {
+            if (timer != null) timer.stop();
+        }
 
     }
 
-    private Observable<String> sendMessage(SimpleMessage message) throws InterruptedException {
+    private void sendMessageWithHystrix(SimpleMessage message) throws InterruptedException {
         try {
             String messageAsString = mapper.writeValueAsString(message);
             counter.incrementAndGet();
             SendMessageSyncCommand syncSend = new SendMessageSyncCommand(messageAsString, queueUrl, sqs);
-            return syncSend.toObservable();
+            syncSend.execute();
+            sentToSQS.incrementAndGet();
         } catch (JsonProcessingException e) {
             logger.error("cannot make json out of message.", e);
         }
-        return null;
     }
 
     private void handleSQSResponse(Observable<String> messageId) {
