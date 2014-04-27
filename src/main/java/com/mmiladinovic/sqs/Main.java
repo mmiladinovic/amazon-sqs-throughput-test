@@ -1,3 +1,5 @@
+package com.mmiladinovic.sqs;
+
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.regions.Region;
@@ -5,20 +7,14 @@ import com.amazonaws.regions.Regions;
 import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteQueueRequest;
+import com.beust.jcommander.JCommander;
 import com.codahale.metrics.CsvReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
-import com.google.common.base.Strings;
-import com.google.common.util.concurrent.RateLimiter;
-import com.netflix.hystrix.strategy.HystrixPlugins;
-import com.netflix.hystrix.strategy.concurrency.HystrixConcurrencyStrategy;
-import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.swing.text.DateFormatter;
 import java.io.File;
-import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -33,8 +29,9 @@ public class Main {
 
     private static final Logger logger = LoggerFactory.getLogger(Main.class);
 
+    private final MetricRegistry metricRegistry = new MetricRegistry();
+
     private AmazonSQSClient sqs;
-    private String queueUrl;
     private boolean deleteQueueAfterwards = true;
 
     private MessageProducer producer;
@@ -42,21 +39,19 @@ public class Main {
     private List<MessageSender> consumers;
     private List<Thread> consumerThreads;
 
-    private final int senderPoolSize;
+    private final CmdOptions opts;
     private int totalMessagesSent;
+    private String queueUrl;
 
 
-    public Main(int senderPoolSize) {
-        if (senderPoolSize < 0 || senderPoolSize > 200) {
-            this.senderPoolSize = 20;
-        }
-        else {
-            this.senderPoolSize = senderPoolSize;
-        }
-        logger.info("sender pool size is {}", senderPoolSize);
+
+
+    public Main(CmdOptions opts) {
+        this.opts = opts;
+        logger.info("sender pool size is {}", opts.getSenderPool());
     }
 
-    public void initSQS(String queueUrl) {
+    public void initSQS() {
         if (sqs != null) {
             throw new IllegalStateException("sqs already initialized");
         }
@@ -65,13 +60,13 @@ public class Main {
         Region usWest2 = Region.getRegion(Regions.fromName(Constants.AWS_REGION));
         sqs = usWest2.createClient(AmazonSQSClient.class, new DefaultAWSCredentialsProviderChain(), config);
 
-        if (Strings.isNullOrEmpty(queueUrl)) {
+        if (opts.hasQueueUrl()) {
             CreateQueueRequest createQueueRequest = new CreateQueueRequest(UUID.randomUUID().toString());
             this.queueUrl = sqs.createQueue(createQueueRequest).getQueueUrl();
             logger.info("created SQS queue {}", queueUrl);
         }
         else {
-            this.queueUrl = queueUrl; this.deleteQueueAfterwards = false;
+            this.queueUrl = opts.getQueueUrl(); this.deleteQueueAfterwards = false;
             logger.info("using existing SQS queue {}", queueUrl);
         }
     }
@@ -89,7 +84,7 @@ public class Main {
         sqs = null;
     }
 
-    public void startThreads(int reportIntervalSeconds) {
+    public void startThreads() {
         if (producerThread != null) {
             throw new IllegalStateException("threads already started");
         }
@@ -100,10 +95,9 @@ public class Main {
         producerThread = new Thread(producer);
         producerThread.start();
 
-        MetricRegistry metricRegistry = new MetricRegistry();
         consumers = new ArrayList<MessageSender>();
         consumerThreads = new ArrayList<Thread>();
-        for (int i = 0; i < senderPoolSize; i++) {
+        for (int i = 0; i < opts.getSenderPool(); i++) {
             MessageSender r = new MessageSender(queueUrl, sqs, queue, metricRegistry);
 
             Thread t = new Thread(r); t.start();
@@ -111,67 +105,74 @@ public class Main {
             consumerThreads.add(t);
         }
 
-//        final Slf4jReporter reporter = Slf4jReporter.forRegistry(metricRegistry)
-//                .outputTo(LoggerFactory.getLogger("com.mmiladinovic.metrics"))
-//                .convertRatesTo(TimeUnit.SECONDS)
-//                .convertDurationsTo(TimeUnit.MILLISECONDS)
-//                .build();
-//        reporter.start(reportIntervalSeconds, TimeUnit.SECONDS);
-        final CsvReporter reporter = CsvReporter.forRegistry(metricRegistry)
-                .formatFor(Locale.UK)
-                .convertRatesTo(TimeUnit.SECONDS)
-                .convertDurationsTo(TimeUnit.MILLISECONDS)
-                .build(new File(System.getProperty("user.home")+"/"));
-        reporter.start(reportIntervalSeconds, TimeUnit.SECONDS);
+    }
+
+    public void startMetricReporter() {
+        if (opts.hasFileReporter()) {
+            final CsvReporter reporter = CsvReporter.forRegistry(metricRegistry)
+                    .formatFor(Locale.UK)
+                    .convertRatesTo(TimeUnit.SECONDS)
+                    .convertDurationsTo(TimeUnit.MILLISECONDS)
+                    .build(new File(System.getProperty("user.home") + "/"));
+            reporter.start(opts.getReportIntervalSec(), TimeUnit.SECONDS);
+        }
+        else {
+            final Slf4jReporter reporter = Slf4jReporter.forRegistry(metricRegistry)
+                    .outputTo(LoggerFactory.getLogger("com.mmiladinovic.metrics"))
+                    .convertRatesTo(TimeUnit.SECONDS)
+                    .convertDurationsTo(TimeUnit.MILLISECONDS)
+                    .build();
+            reporter.start(opts.getReportIntervalSec(), TimeUnit.SECONDS);
+        }
     }
 
     public void stopThreads() {
         logger.info("shutting down producers and senders");
         producer.cancel();
         producerThread.interrupt();
-        int totalSent = 0;
         for (MessageSender sender : consumers) {
             sender.cancel();
-            totalSent += sender.getMessagesSent();
         }
         for (Thread t : consumerThreads) {
             t.interrupt();
         }
-        this.totalMessagesSent = totalSent;
     }
 
-    public int getTotalMessagesSent() {
-        return totalMessagesSent;
+    public long getTotalMessagesSent() {
+        return metricRegistry.meter(Constants.SENT_TO_SQS_METER).getCount();
     }
 
-
+    public long getTotalErrors() {
+        return metricRegistry.meter(Constants.ERROR_FROM_SQS_METER).getCount();
+    }
 
     public static void main(String[] args) throws Exception {
-        int senderPoolSize = Integer.valueOf(args[0]);
-        int runTimeSeconds = Integer.valueOf(args[1]);
-        String queueURL = args[2];
-        int reportIntervalSeconds = args[3] != null ? Integer.valueOf(args[3]) : 1;
+        CmdOptions opts = new CmdOptions();
+        new JCommander(opts, args);
 
-        Main m = new Main(senderPoolSize);
-        m.initSQS(StringUtils.startsWith(queueURL, "'") ? StringUtils.remove(queueURL, "'") : queueURL);
+        Main m = new Main(opts);
+        m.initSQS();
 
-        long sleepTime = sleepTimeMillis();
-        logger.info("senderPoolSize {}, runTimeInSeconds {}, waiting for another {} seconds until {} to kick off the test",
-                senderPoolSize, runTimeSeconds, TimeUnit.SECONDS.convert(sleepTime, TimeUnit.MILLISECONDS), new Date(System.currentTimeMillis()+sleepTime));
+        if (!opts.isNoWaitBeforeStart()) {
+            long sleepTime = sleepTimeMillis();
+            logger.info("senderPoolSize {}, runTimeInSeconds {}, waiting for another {} seconds until {} to kick off the test",
+                    opts.getSenderPool(), opts.getRunTimeSec(), TimeUnit.SECONDS.convert(sleepTime, TimeUnit.MILLISECONDS), new Date(System.currentTimeMillis()+sleepTime));
+            Thread.sleep(sleepTime);
+        }
 
-        Thread.sleep(sleepTime);
+        m.startThreads();
+        m.startMetricReporter();
 
-        m.startThreads(reportIntervalSeconds);
-
-        logger.info("running SQS test for {} seconds", runTimeSeconds);
-        Thread.sleep(TimeUnit.SECONDS.toMillis(runTimeSeconds));
+        logger.info("running SQS test for {} seconds", opts.getRunTimeSec());
+        Thread.sleep(TimeUnit.SECONDS.toMillis(opts.getRunTimeSec()));
 
         m.stopThreads();
         m.cleanupSQS();
 
-        Thread.sleep(TimeUnit.SECONDS.toMillis(reportIntervalSeconds+1));
+        Thread.sleep(TimeUnit.SECONDS.toMillis(opts.getReportIntervalSec()+1));
 
-        logger.info("total messages sent {}, at rate {}/second", m.getTotalMessagesSent(), m.getTotalMessagesSent() / runTimeSeconds);
+        logger.info("total messages sent {}, at rate {}/second. errors count {}",
+                m.getTotalMessagesSent(), m.getTotalMessagesSent() / opts.getRunTimeSec(), m.getTotalErrors());
     }
 
     private static long sleepTimeMillis() {

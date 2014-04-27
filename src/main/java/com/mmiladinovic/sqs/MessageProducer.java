@@ -1,4 +1,5 @@
-import com.google.common.util.concurrent.RateLimiter;
+package com.mmiladinovic.sqs;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

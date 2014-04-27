@@ -1,10 +1,10 @@
+package com.mmiladinovic.sqs;
+
 import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.HystrixThreadPoolProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import static com.netflix.hystrix.HystrixCommand.Setter.withGroupKey;
 
@@ -22,7 +22,7 @@ public class SendMessageSyncCommand extends HystrixCommand<String> {
     private final String message;
 
     public SendMessageSyncCommand(String message, String queueUrl, AmazonSQSClient sqs) {
-        super(withGroupKey(HystrixCommandGroupKey.Factory.asKey("SendMessageSyncCommand"))
+        super(withGroupKey(HystrixCommandGroupKey.Factory.asKey("com.mmiladinovic.sqs.SendMessageSyncCommand"))
                 .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
                         .withExecutionIsolationThreadTimeoutInMilliseconds(Constants.SEND_COMMAND_TIMEOUT))
                 .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withCoreSize(Constants.SEND_COMMAND_POOL_SIZE))

@@ -1,3 +1,5 @@
+package com.mmiladinovic.sqs;
+
 /**
  * Created with IntelliJ IDEA.
  * User: miroslavmiladinovic

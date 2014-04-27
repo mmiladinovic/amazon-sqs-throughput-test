@@ -1,5 +1,6 @@
+package com.mmiladinovic.sqs;
+
 import com.amazonaws.services.sqs.AmazonSQSClient;
-import com.amazonaws.services.sqs.model.SendMessageBatchRequest;
 import com.amazonaws.services.sqs.model.SendMessageBatchRequestEntry;
 import com.amazonaws.services.sqs.model.SendMessageBatchResult;
 import com.netflix.hystrix.HystrixCommand;
@@ -26,7 +27,7 @@ public class SendMessageBatchSyncCommand extends HystrixCommand<SendMessageBatch
     private final List<String> messages;
 
     public SendMessageBatchSyncCommand(List<String> messages, String queueUrl, AmazonSQSClient sqs) {
-        super(withGroupKey(HystrixCommandGroupKey.Factory.asKey("SendMessageBatchSyncCommand"))
+        super(withGroupKey(HystrixCommandGroupKey.Factory.asKey("com.mmiladinovic.sqs.SendMessageBatchSyncCommand"))
                 .andCommandPropertiesDefaults(HystrixCommandProperties.Setter()
                         .withExecutionIsolationThreadTimeoutInMilliseconds(Constants.SEND_COMMAND_TIMEOUT))
                 .andThreadPoolPropertiesDefaults(HystrixThreadPoolProperties.Setter().withCoreSize(Constants.SEND_COMMAND_POOL_SIZE))

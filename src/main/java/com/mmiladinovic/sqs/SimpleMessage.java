@@ -1,3 +1,5 @@
+package com.mmiladinovic.sqs;
+
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.concurrent.ThreadSafe;
