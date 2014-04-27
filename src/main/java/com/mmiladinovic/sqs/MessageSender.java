@@ -40,10 +40,10 @@ public class MessageSender implements Runnable {
         this.queueUrl = queueUrl;
         this.sqs = sqs;
 
-        messagesDequeuedMeter = metricRegistry.meter("messagesDequeuedMeter");
+        messagesDequeuedMeter = metricRegistry.meter(Constants.MESSAGES_DEQUEUED_METER);
         sentToSQSMeter = metricRegistry.meter(Constants.SENT_TO_SQS_METER);
         errorToSQSMeter = metricRegistry.meter(Constants.ERROR_FROM_SQS_METER);
-        sqsSendTimer = metricRegistry.timer("sqsSendTime");
+        sqsSendTimer = metricRegistry.timer(Constants.SQS_SEND_TIMER);
     }
 
     public void cancel() {
@@ -118,11 +118,4 @@ public class MessageSender implements Runnable {
 
     }
 
-    public long getMessagesSent() {
-        return sentToSQSMeter.getCount();
-    }
-
-    public long getErrorToSQSMeter() {
-        return errorToSQSMeter.getCount();
-    }
 }

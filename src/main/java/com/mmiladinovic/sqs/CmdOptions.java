@@ -29,6 +29,12 @@ public class CmdOptions {
         }
     }
 
+    @Parameter(names = "-awsAccessKey", description = "AWS access key", required = true)
+    private String awsAccessKey;
+
+    @Parameter(names = "-awsSecretKey", description = "AWS secret key", required = true)
+    private String awsSecretKey;
+
     @Parameter(names = "-senderPool", description = "number of threads in SQS sender pool", validateValueWith = RangeValidator.class)
     private int senderPool = 20;
 
@@ -49,8 +55,16 @@ public class CmdOptions {
             "wait is useful for syncing up with other test clients.")
     private boolean noWaitBeforeStart = false;
 
-    @Parameter(names = "--help", help = true)
+    @Parameter(names = "-help", help = true)
     private boolean help;
+
+    public String getAwsAccessKey() {
+        return awsAccessKey;
+    }
+
+    public String getAwsSecretKey() {
+        return awsSecretKey;
+    }
 
     public int getSenderPool() {
         return senderPool;

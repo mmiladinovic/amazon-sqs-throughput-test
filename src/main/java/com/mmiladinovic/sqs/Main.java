@@ -1,13 +1,16 @@
 package com.mmiladinovic.sqs;
 
 import com.amazonaws.ClientConfiguration;
+import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.internal.StaticCredentialsProvider;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.amazonaws.services.sqs.model.CreateQueueRequest;
 import com.amazonaws.services.sqs.model.DeleteQueueRequest;
 import com.beust.jcommander.JCommander;
+import com.beust.jcommander.ParameterException;
 import com.codahale.metrics.CsvReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
@@ -58,7 +61,7 @@ public class Main {
         ClientConfiguration config = new ClientConfiguration();
 
         Region usWest2 = Region.getRegion(Regions.fromName(Constants.AWS_REGION));
-        sqs = usWest2.createClient(AmazonSQSClient.class, new DefaultAWSCredentialsProviderChain(), config);
+        sqs = usWest2.createClient(AmazonSQSClient.class, new StaticCredentialsProvider(new BasicAWSCredentials(opts.getAwsAccessKey(), opts.getAwsSecretKey())), config);
 
         if (opts.hasQueueUrl()) {
             CreateQueueRequest createQueueRequest = new CreateQueueRequest(UUID.randomUUID().toString());
@@ -148,7 +151,13 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         CmdOptions opts = new CmdOptions();
-        new JCommander(opts, args);
+        JCommander cmder = new JCommander(opts);
+        try {
+            cmder.parse(args);
+        }
+        catch (ParameterException e) {
+            cmder.usage();
+        }
 
         Main m = new Main(opts);
         m.initSQS();
