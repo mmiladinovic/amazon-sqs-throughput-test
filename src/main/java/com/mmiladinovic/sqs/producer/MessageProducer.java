@@ -1,5 +1,6 @@
-package com.mmiladinovic.sqs;
+package com.mmiladinovic.sqs.producer;
 
+import com.mmiladinovic.sqs.SimpleMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,7 +31,7 @@ public class MessageProducer implements Runnable {
         try {
             while (!cancelled) {
                 counter.incrementAndGet();
-                generateMessage();
+                messageQ.put(generateMessage());
             }
         }
         catch (InterruptedException e) {
@@ -45,9 +46,9 @@ public class MessageProducer implements Runnable {
         this.cancelled = true;
     }
 
-    private void generateMessage() throws InterruptedException {
+    private SimpleMessage generateMessage() {
         String userId = UUID.randomUUID().toString();
         String objectId = UUID.randomUUID().toString();
-        messageQ.put(new SimpleMessage(objectId, userId));
+        return new SimpleMessage(objectId, userId);
     }
 }

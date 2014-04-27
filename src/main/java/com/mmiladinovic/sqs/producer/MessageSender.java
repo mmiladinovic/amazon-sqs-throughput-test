@@ -1,4 +1,4 @@
-package com.mmiladinovic.sqs;
+package com.mmiladinovic.sqs.producer;
 
 import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.codahale.metrics.Meter;
@@ -6,6 +6,8 @@ import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Timer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mmiladinovic.sqs.Constants;
+import com.mmiladinovic.sqs.SimpleMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,10 +42,10 @@ public class MessageSender implements Runnable {
         this.queueUrl = queueUrl;
         this.sqs = sqs;
 
-        messagesDequeuedMeter = metricRegistry.meter(Constants.MESSAGES_DEQUEUED_METER);
-        sentToSQSMeter = metricRegistry.meter(Constants.SENT_TO_SQS_METER);
-        errorToSQSMeter = metricRegistry.meter(Constants.ERROR_FROM_SQS_METER);
-        sqsSendTimer = metricRegistry.timer(Constants.SQS_SEND_TIMER);
+        messagesDequeuedMeter = metricRegistry.meter(Constants.METER_PRODUCER_MESSAGES_DEQUEUED);
+        sentToSQSMeter = metricRegistry.meter(Constants.METER_PRODUCER_SENT_TO_SQS);
+        errorToSQSMeter = metricRegistry.meter(Constants.METER_PRODUCER_SQS_SEND_FAIL);
+        sqsSendTimer = metricRegistry.timer(Constants.TIMER_PRODUCER_SQS_SEND);
     }
 
     public void cancel() {

@@ -20,8 +20,8 @@ public class CmdOptions {
     public static class RangeValidator implements IValueValidator<Integer> {
         @Override
         public void validate(String name, Integer value) throws ParameterException {
-            if ("-senderPool".equalsIgnoreCase(name) && (value < 1 || value >= 200)) {
-                throw new ParameterException("senderPool option should be positive and less than 200");
+            if ("-workerPool".equalsIgnoreCase(name) && (value < 1 || value >= 200)) {
+                throw new ParameterException("workerPool option should be positive and less than 200");
             }
             if ("-runTimeSec".equalsIgnoreCase(name) && (value < 1 || value >= 3600)) {
                 throw new ParameterException("runTimeSec option should be positive and less than 3600");
@@ -35,8 +35,8 @@ public class CmdOptions {
     @Parameter(names = "-awsSecretKey", description = "AWS secret key", required = true)
     private String awsSecretKey;
 
-    @Parameter(names = "-senderPool", description = "number of threads in SQS sender pool", validateValueWith = RangeValidator.class)
-    private int senderPool = 20;
+    @Parameter(names = "-workerPool", description = "number of threads in SQS sender pool", validateValueWith = RangeValidator.class)
+    private int workerPool = 20;
 
     @Parameter(names = "-runTimeSec", description = "test run time in seconds", validateValueWith = RangeValidator.class)
     private int runTimeSec = 10;
@@ -66,8 +66,8 @@ public class CmdOptions {
         return awsSecretKey;
     }
 
-    public int getSenderPool() {
-        return senderPool;
+    public int getWorkerPool() {
+        return workerPool;
     }
 
     public int getRunTimeSec() {
@@ -79,7 +79,7 @@ public class CmdOptions {
     }
 
     public boolean hasQueueUrl() {
-        return Strings.isNullOrEmpty(queueUrl);
+        return !Strings.isNullOrEmpty(queueUrl);
     }
 
     public File getReportToFile() {

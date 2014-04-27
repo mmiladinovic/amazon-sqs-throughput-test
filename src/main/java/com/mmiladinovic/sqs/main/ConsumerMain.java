@@ -1,57 +1,53 @@
-package com.mmiladinovic.sqs;
+package com.mmiladinovic.sqs.main;
 
 import com.amazonaws.ClientConfiguration;
 import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import com.amazonaws.internal.StaticCredentialsProvider;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.sqs.AmazonSQSClient;
-import com.amazonaws.services.sqs.model.CreateQueueRequest;
-import com.amazonaws.services.sqs.model.DeleteQueueRequest;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
 import com.codahale.metrics.CsvReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
+import com.mmiladinovic.sqs.CmdOptions;
+import com.mmiladinovic.sqs.Constants;
+import com.mmiladinovic.sqs.consumer.MessageConsumer;
+import com.mmiladinovic.sqs.consumer.MessagePoller;
+import com.mmiladinovic.sqs.consumer.SQSMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created with IntelliJ IDEA.
  * User: miroslavmiladinovic
- * Date: 19/04/2014
- * Time: 20:02
+ * Date: 26/04/2014
+ * Time: 18:20
  * To change this template use File | Settings | File Templates.
  */
-public class Main {
-
-    private static final Logger logger = LoggerFactory.getLogger(Main.class);
+public class ConsumerMain {
+    private static final Logger logger = LoggerFactory.getLogger(ConsumerMain.class);
 
     private final MetricRegistry metricRegistry = new MetricRegistry();
 
     private AmazonSQSClient sqs;
-    private boolean deleteQueueAfterwards = true;
 
-    private MessageProducer producer;
-    private Thread producerThread;
-    private List<MessageSender> consumers;
-    private List<Thread> consumerThreads;
+    private List<MessagePoller> pollers;
+    private List<MessageConsumer> consumers;
 
     private final CmdOptions opts;
-    private int totalMessagesSent;
     private String queueUrl;
 
-
-
-
-    public Main(CmdOptions opts) {
+    public ConsumerMain(CmdOptions opts) {
         this.opts = opts;
-        logger.info("sender pool size is {}", opts.getSenderPool());
+        logger.info("SQS poller pool size is {}", opts.getWorkerPool());
     }
 
     public void initSQS() {
@@ -64,48 +60,32 @@ public class Main {
         sqs = usWest2.createClient(AmazonSQSClient.class, new StaticCredentialsProvider(new BasicAWSCredentials(opts.getAwsAccessKey(), opts.getAwsSecretKey())), config);
 
         if (opts.hasQueueUrl()) {
-            CreateQueueRequest createQueueRequest = new CreateQueueRequest(UUID.randomUUID().toString());
-            this.queueUrl = sqs.createQueue(createQueueRequest).getQueueUrl();
-            logger.info("created SQS queue {}", queueUrl);
+            this.queueUrl = opts.getQueueUrl();
+            logger.info("polling from SQS queue {}", queueUrl);
         }
         else {
-            this.queueUrl = opts.getQueueUrl(); this.deleteQueueAfterwards = false;
-            logger.info("using existing SQS queue {}", queueUrl);
+            throw new RuntimeException("queueURL must be supplied");
         }
-    }
-
-    public void cleanupSQS() {
-        if (sqs == null) {
-            throw new IllegalStateException("sqs already cleaned up");
-        }
-        if (deleteQueueAfterwards) {
-            logger.info("about to delete queue {}", queueUrl);
-            sqs.deleteQueue(new DeleteQueueRequest(queueUrl));
-            logger.info("queue {} deleted", queueUrl);
-        }
-        queueUrl = null;
-        sqs = null;
     }
 
     public void startThreads() {
-        if (producerThread != null) {
+        if (pollers != null || consumers != null) {
             throw new IllegalStateException("threads already started");
         }
-        BlockingQueue<SimpleMessage> queue = new LinkedBlockingDeque<SimpleMessage>(Constants.BOUND);
-        BlockingQueue<String> dlq = new ArrayBlockingQueue<String>(Constants.BOUND);
+        BlockingQueue<SQSMessage> queue = new LinkedBlockingDeque<SQSMessage>(Constants.BOUND);
 
-        producer = new MessageProducer(queue);
-        producerThread = new Thread(producer);
-        producerThread.start();
+        pollers = new ArrayList<MessagePoller>(opts.getWorkerPool());
+        for (int i = 0; i < opts.getWorkerPool(); i++) {
+            MessagePoller r = new MessagePoller(queue, queueUrl, sqs, metricRegistry);
+            Thread t = new Thread(r); t.start();
+            pollers.add(r);
+        }
 
-        consumers = new ArrayList<MessageSender>();
-        consumerThreads = new ArrayList<Thread>();
-        for (int i = 0; i < opts.getSenderPool(); i++) {
-            MessageSender r = new MessageSender(queueUrl, sqs, queue, metricRegistry);
-
+        consumers = new ArrayList<MessageConsumer>(opts.getWorkerPool());
+        for (int i = 0; i < opts.getWorkerPool(); i++) {
+            MessageConsumer r = new MessageConsumer(queue, queueUrl, sqs, metricRegistry);
             Thread t = new Thread(r); t.start();
             consumers.add(r);
-            consumerThreads.add(t);
         }
 
     }
@@ -130,23 +110,27 @@ public class Main {
     }
 
     public void stopThreads() {
-        logger.info("shutting down producers and senders");
-        producer.cancel();
-        producerThread.interrupt();
-        for (MessageSender sender : consumers) {
-            sender.cancel();
+        logger.info("shutting down pollers and consumers");
+
+        for (MessagePoller poller : pollers) {
+            poller.cancel();
         }
-        for (Thread t : consumerThreads) {
-            t.interrupt();
+
+        for (MessageConsumer c : consumers) {
+            c.cancel();
         }
     }
 
-    public long getTotalMessagesSent() {
-        return metricRegistry.meter(Constants.SENT_TO_SQS_METER).getCount();
+    public long getTotalMessagesPolled() {
+        return metricRegistry.meter(Constants.METER_POLLER_MESSAGES_POLLED).getCount();
+    }
+
+    public long getTotalMessagesDeleted() {
+        return metricRegistry.meter(Constants.METER_CONSUMER_MESSAGES_CONSUMED).getCount();
     }
 
     public long getTotalErrors() {
-        return metricRegistry.meter(Constants.ERROR_FROM_SQS_METER).getCount();
+        return metricRegistry.counter(Constants.COUNTER_POLLER_SQS_RECEIVE_ERROR).getCount();
     }
 
     public static void main(String[] args) throws Exception {
@@ -159,13 +143,13 @@ public class Main {
             cmder.usage();
         }
 
-        Main m = new Main(opts);
+        ConsumerMain m = new ConsumerMain(opts);
         m.initSQS();
 
         if (!opts.isNoWaitBeforeStart()) {
             long sleepTime = sleepTimeMillis();
-            logger.info("senderPoolSize {}, runTimeInSeconds {}, waiting for another {} seconds until {} to kick off the test",
-                    opts.getSenderPool(), opts.getRunTimeSec(), TimeUnit.SECONDS.convert(sleepTime, TimeUnit.MILLISECONDS), new Date(System.currentTimeMillis()+sleepTime));
+            logger.info("pollerPoolSize {}, runTimeInSeconds {}, waiting for another {} seconds until {} to kick off the test",
+                    opts.getWorkerPool(), opts.getRunTimeSec(), TimeUnit.SECONDS.convert(sleepTime, TimeUnit.MILLISECONDS), new Date(System.currentTimeMillis()+sleepTime));
             Thread.sleep(sleepTime);
         }
 
@@ -176,12 +160,14 @@ public class Main {
         Thread.sleep(TimeUnit.SECONDS.toMillis(opts.getRunTimeSec()));
 
         m.stopThreads();
-        m.cleanupSQS();
 
         Thread.sleep(TimeUnit.SECONDS.toMillis(opts.getReportIntervalSec()+1));
 
-        logger.info("total messages sent {}, at rate {}/second. errors count {}",
-                m.getTotalMessagesSent(), m.getTotalMessagesSent() / opts.getRunTimeSec(), m.getTotalErrors());
+        logger.info("total messages polled {}, at rate {}/second. errors count {}",
+                m.getTotalMessagesPolled(), m.getTotalMessagesPolled() / opts.getRunTimeSec(), m.getTotalErrors());
+        logger.info("total messages deleted {}, at rate {}/second. errors count {}",
+                m.getTotalMessagesDeleted(), m.getTotalMessagesDeleted() / opts.getRunTimeSec(), m.getTotalErrors());
+
     }
 
     private static long sleepTimeMillis() {
@@ -192,6 +178,5 @@ public class Main {
         cal.add(Calendar.MINUTE, 2);
         return cal.getTimeInMillis() - now;
     }
-
 
 }
