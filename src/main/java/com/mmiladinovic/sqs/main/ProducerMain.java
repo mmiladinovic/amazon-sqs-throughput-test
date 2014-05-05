@@ -64,7 +64,7 @@ public class ProducerMain {
         Region usWest2 = Region.getRegion(Regions.fromName(Constants.AWS_REGION));
         sqs = usWest2.createClient(AmazonSQSClient.class, new StaticCredentialsProvider(new BasicAWSCredentials(opts.getAwsAccessKey(), opts.getAwsSecretKey())), config);
 
-        if (opts.hasQueueUrl()) {
+        if (!opts.hasQueueUrl()) {
             CreateQueueRequest createQueueRequest = new CreateQueueRequest(UUID.randomUUID().toString());
             this.queueUrl = sqs.createQueue(createQueueRequest).getQueueUrl();
             logger.info("created SQS queue {}", queueUrl);
