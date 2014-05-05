@@ -29,6 +29,13 @@ public class CmdOptions {
         }
     }
 
+
+    @Parameter(names = "-zk", description = "ZooKeeper connections string, comma separated host:port")
+    private String zk;
+
+    @Parameter(names = "-nodes", description = "number of test nodes to wait for")
+    private int nodes = 1;
+
     @Parameter(names = "-awsAccessKey", description = "AWS access key", required = true)
     private String awsAccessKey;
 
@@ -94,7 +101,16 @@ public class CmdOptions {
         return reportIntervalSec;
     }
 
-    public boolean isNoWaitBeforeStart() {
-        return noWaitBeforeStart;
+
+    public boolean isWaitRequired() {
+        return !noWaitBeforeStart;
+    }
+
+    public String getZk() {
+        return zk;
+    }
+
+    public int getNodes() {
+        return nodes;
     }
 }

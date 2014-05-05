@@ -1,9 +1,12 @@
 amazon-sqs-throughput-test
 ==========================
 
-little test harness to test throughput of Amazon SQS
+Little test harness to test throughput of Amazon SQS. Optionally uses ZooKeeper to coordinate test start/stop between nodes.
 
 ## Building and Running
 
     mvn clean package;
-    java -jar target/amazon-sqs-test-1.0-SNAPSHOT.jar
+    java -classpath target/amazon-sqs-test-1.0-SNAPSHOT.jar com.mmiladinovic.sqs.main.ConsumerMain
+    java -classpath target/amazon-sqs-test-1.0-SNAPSHOT.jar com.mmiladinovic.sqs.main.ProducerMain
+
+

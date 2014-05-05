@@ -11,15 +11,19 @@ import com.beust.jcommander.ParameterException;
 import com.codahale.metrics.CsvReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
+import com.google.common.base.Throwables;
 import com.mmiladinovic.sqs.CmdOptions;
 import com.mmiladinovic.sqs.Constants;
 import com.mmiladinovic.sqs.consumer.MessageConsumer;
 import com.mmiladinovic.sqs.consumer.MessagePoller;
 import com.mmiladinovic.sqs.consumer.SQSMessage;
+import org.apache.commons.io.FileUtils;
+import org.apache.curator.framework.recipes.barriers.DistributedDoubleBarrier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingDeque;
@@ -92,11 +96,19 @@ public class ConsumerMain {
 
     public void startMetricReporter() {
         if (opts.hasFileReporter()) {
+            File subDir = null;
+            try {
+                subDir = new File(opts.getReportToFile(), UUID.randomUUID().toString());
+                FileUtils.forceMkdir(subDir);
+            }
+            catch (IOException e) {
+                Throwables.propagate(e);
+            }
             final CsvReporter reporter = CsvReporter.forRegistry(metricRegistry)
                     .formatFor(Locale.UK)
                     .convertRatesTo(TimeUnit.SECONDS)
                     .convertDurationsTo(TimeUnit.MILLISECONDS)
-                    .build(new File(System.getProperty("user.home") + "/"));
+                    .build(subDir);
             reporter.start(opts.getReportIntervalSec(), TimeUnit.SECONDS);
         }
         else {
@@ -143,14 +155,17 @@ public class ConsumerMain {
             cmder.usage();
         }
 
+
         ConsumerMain m = new ConsumerMain(opts);
         m.initSQS();
 
-        if (!opts.isNoWaitBeforeStart()) {
-            long sleepTime = sleepTimeMillis();
-            logger.info("pollerPoolSize {}, runTimeInSeconds {}, waiting for another {} seconds until {} to kick off the test",
-                    opts.getWorkerPool(), opts.getRunTimeSec(), TimeUnit.SECONDS.convert(sleepTime, TimeUnit.MILLISECONDS), new Date(System.currentTimeMillis()+sleepTime));
-            Thread.sleep(sleepTime);
+        DistributedDoubleBarrier barrier = null;
+        if (opts.isWaitRequired()) {
+            barrier = new DistributedDoubleBarrier(ZooKeeper.startForZkServer(opts.getZk()), "/sqs-test", opts.getNodes());
+
+            logger.info("about to enter Zk Barrier to wait for {} test nodes", opts.getNodes());
+            barrier.enter();
+            logger.info("released from Zk Barrier. Off we go...");
         }
 
         m.startThreads();
@@ -167,16 +182,9 @@ public class ConsumerMain {
                 m.getTotalMessagesPolled(), m.getTotalMessagesPolled() / opts.getRunTimeSec(), m.getTotalErrors());
         logger.info("total messages deleted {}, at rate {}/second. errors count {}",
                 m.getTotalMessagesDeleted(), m.getTotalMessagesDeleted() / opts.getRunTimeSec(), m.getTotalErrors());
-
-    }
-
-    private static long sleepTimeMillis() {
-        long now = System.currentTimeMillis();
-        Calendar cal = Calendar.getInstance();
-        cal.setTimeInMillis(now);
-        cal.clear(Calendar.SECOND); cal.clear(Calendar.MILLISECOND);
-        cal.add(Calendar.MINUTE, 2);
-        return cal.getTimeInMillis() - now;
+        if (barrier != null) {
+            barrier.leave();
+        }
     }
 
 }

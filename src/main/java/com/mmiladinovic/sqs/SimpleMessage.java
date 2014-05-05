@@ -1,9 +1,12 @@
 package com.mmiladinovic.sqs;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.commons.lang.time.DateUtils;
 
 import javax.annotation.concurrent.ThreadSafe;
 import java.io.Serializable;
+import java.util.Calendar;
+import java.util.TimeZone;
 
 /**
  * Created with IntelliJ IDEA.
@@ -16,13 +19,16 @@ import java.io.Serializable;
 public class SimpleMessage implements Serializable {
 
     private static final long serialVersionUID = 1896180568594719315L;
+    private static final Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
 
     private final String objectId;
     private final String userId;
+    private final long timeGenerated;
 
     public SimpleMessage(String objectId, String userId) {
         this.objectId = objectId;
         this.userId = userId;
+        timeGenerated = cal.getTimeInMillis();
     }
 
     @JsonProperty
@@ -33,6 +39,11 @@ public class SimpleMessage implements Serializable {
     @JsonProperty
     public String getObjectId() {
         return objectId;
+    }
+
+    @JsonProperty
+    public long getTimeGenerated() {
+        return timeGenerated;
     }
 
     @Override

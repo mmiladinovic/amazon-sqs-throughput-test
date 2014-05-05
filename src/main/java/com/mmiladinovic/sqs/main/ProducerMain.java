@@ -13,15 +13,21 @@ import com.beust.jcommander.ParameterException;
 import com.codahale.metrics.CsvReporter;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
+import com.google.common.base.Throwables;
 import com.mmiladinovic.sqs.CmdOptions;
 import com.mmiladinovic.sqs.Constants;
 import com.mmiladinovic.sqs.SimpleMessage;
 import com.mmiladinovic.sqs.producer.MessageProducer;
 import com.mmiladinovic.sqs.producer.MessageSender;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.FilenameUtils;
+import org.apache.commons.lang.time.DateUtils;
+import org.apache.curator.framework.recipes.barriers.DistributedDoubleBarrier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -47,7 +53,6 @@ public class ProducerMain {
     private List<Thread> consumerThreads;
 
     private final CmdOptions opts;
-    private int totalMessagesSent;
     private String queueUrl;
 
     public ProducerMain(CmdOptions opts) {
@@ -113,11 +118,19 @@ public class ProducerMain {
 
     public void startMetricReporter() {
         if (opts.hasFileReporter()) {
+            File subDir = null;
+            try {
+                subDir = new File(opts.getReportToFile(), UUID.randomUUID().toString());
+                FileUtils.forceMkdir(subDir);
+            }
+            catch (IOException e) {
+                Throwables.propagate(e);
+            }
             final CsvReporter reporter = CsvReporter.forRegistry(metricRegistry)
                     .formatFor(Locale.UK)
                     .convertRatesTo(TimeUnit.SECONDS)
                     .convertDurationsTo(TimeUnit.MILLISECONDS)
-                    .build(new File(System.getProperty("user.home") + "/"));
+                    .build(subDir);
             reporter.start(opts.getReportIntervalSec(), TimeUnit.SECONDS);
         }
         else {
@@ -160,14 +173,17 @@ public class ProducerMain {
             cmder.usage();
         }
 
+
         ProducerMain m = new ProducerMain(opts);
         m.initSQS();
 
-        if (!opts.isNoWaitBeforeStart()) {
-            long sleepTime = sleepTimeMillis();
-            logger.info("senderPoolSize {}, runTimeInSeconds {}, waiting for another {} seconds until {} to kick off the test",
-                    opts.getWorkerPool(), opts.getRunTimeSec(), TimeUnit.SECONDS.convert(sleepTime, TimeUnit.MILLISECONDS), new Date(System.currentTimeMillis()+sleepTime));
-            Thread.sleep(sleepTime);
+        DistributedDoubleBarrier barrier = null;
+
+        if (opts.isWaitRequired()) {
+            barrier = new DistributedDoubleBarrier(ZooKeeper.startForZkServer(opts.getZk()), "/sqs-test", opts.getNodes());
+            logger.info("about to enter Zk Barrier to wait for {} test nodes", opts.getNodes());
+            barrier.enter();
+            logger.info("released from Zk Barrier");
         }
 
         m.startThreads();
@@ -179,20 +195,13 @@ public class ProducerMain {
         m.stopThreads();
         m.cleanupSQS();
 
+        // wait up a little more to ensure metrics reporter is flushed
         Thread.sleep(TimeUnit.SECONDS.toMillis(opts.getReportIntervalSec()+1));
 
         logger.info("total messages sent {}, at rate {}/second. errors count {}",
                 m.getTotalMessagesSent(), m.getTotalMessagesSent() / opts.getRunTimeSec(), m.getTotalErrors());
+        if (barrier != null) {
+            barrier.leave();
+        }
     }
-
-    private static long sleepTimeMillis() {
-        long now = System.currentTimeMillis();
-        Calendar cal = Calendar.getInstance();
-        cal.setTimeInMillis(now);
-        cal.clear(Calendar.SECOND); cal.clear(Calendar.MILLISECOND);
-        cal.add(Calendar.MINUTE, 2);
-        return cal.getTimeInMillis() - now;
-    }
-
-
 }

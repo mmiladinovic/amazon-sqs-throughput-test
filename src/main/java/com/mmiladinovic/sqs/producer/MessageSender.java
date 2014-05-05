@@ -57,11 +57,11 @@ public class MessageSender implements Runnable {
         try {
             while (!cancelled) {
                 //sendMessageWithHystrix(queue.take());
-                  sendMessageSync(queue.take());
-//                List<SimpleMessage> batch = new ArrayList<SimpleMessage>(10);
-//                if (queue.drainTo(batch, 10) > 0) {
-//                    sendMessageBatchSync(batch);
-//                }
+//                  sendMessageSync(queue.take());
+                List<SimpleMessage> batch = new ArrayList<SimpleMessage>(10);
+                if (queue.drainTo(batch, 10) > 0) {
+                    sendMessageBatchSync(batch);
+                }
 
             }
         }
