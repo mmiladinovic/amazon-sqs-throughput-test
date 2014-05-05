@@ -4,10 +4,7 @@ import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.ReceiveMessageResult;
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.Timer;
+import com.codahale.metrics.*;
 import com.mmiladinovic.sqs.Constants;
 import com.mmiladinovic.sqs.producer.MessageSender;
 import org.slf4j.Logger;
@@ -16,6 +13,8 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+
+import static com.codahale.metrics.MetricRegistry.name;
 
 /**
  * Created with IntelliJ IDEA.
@@ -37,14 +36,20 @@ public class MessagePoller implements Runnable {
 
     private volatile boolean cancelled;
 
-    public MessagePoller(BlockingQueue<SQSMessage> receiveQueue, String queueUrl, AmazonSQSClient sqs, MetricRegistry metricRegistry) {
-        this.receiveQueue = receiveQueue;
+    public MessagePoller(BlockingQueue<SQSMessage> receiveQ, String queueUrl, AmazonSQSClient sqs, MetricRegistry metricRegistry) {
+        this.receiveQueue = receiveQ;
         this.queueUrl = queueUrl;
         this.sqs = sqs;
 
         messagePollerMeter = metricRegistry.meter(Constants.METER_POLLER_MESSAGES_POLLED);
         sqsReceiveTimer = metricRegistry.timer(Constants.TIMER_POLLER_SQS_RECEIVE);
         messageErrorsCounter = metricRegistry.counter(Constants.COUNTER_POLLER_SQS_RECEIVE_ERROR);
+        metricRegistry.register(name(MessagePoller.class, Constants.GAUGE_CONSUMER_QUEUE_SIZE), new Gauge<Integer>() {
+            @Override
+            public Integer getValue() {
+                return receiveQueue.size();
+            }
+        });
     }
 
     @Override

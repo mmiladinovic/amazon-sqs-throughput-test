@@ -76,7 +76,7 @@ public class ConsumerMain {
         if (pollers != null || consumers != null) {
             throw new IllegalStateException("threads already started");
         }
-        BlockingQueue<SQSMessage> queue = new LinkedBlockingDeque<SQSMessage>(Constants.BOUND);
+        BlockingQueue<SQSMessage> queue = new LinkedBlockingDeque<SQSMessage>(100000);
 
         pollers = new ArrayList<MessagePoller>(opts.getWorkerPool());
         for (int i = 0; i < opts.getWorkerPool(); i++) {
