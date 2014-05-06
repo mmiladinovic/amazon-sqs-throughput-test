@@ -27,6 +27,7 @@ public interface Constants {
     public static final String COUNTER_POLLER_SQS_RECEIVE_ERROR = "counter-poller-sqs-receieve-error";
 
     public static final String GAUGE_CONSUMER_QUEUE_SIZE = "gauge-consumer-queue-size";
+    public static final String HISTOGRAM_MESSAGE_LATENCY_ACROSS_SQS = "histogram-message-latency-x-sqs";
 
     // message consumer (delete) metrics
     public static final String METER_CONSUMER_MESSAGES_CONSUMED = "meter-consumer-messages-consumed";

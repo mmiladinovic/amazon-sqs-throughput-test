@@ -9,6 +9,7 @@ import com.amazonaws.services.sqs.AmazonSQSClient;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.ParameterException;
 import com.codahale.metrics.CsvReporter;
+import com.codahale.metrics.Gauge;
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
 import com.google.common.base.Throwables;
@@ -28,6 +29,8 @@ import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
+
+import static com.codahale.metrics.MetricRegistry.name;
 
 /**
  * Created with IntelliJ IDEA.
@@ -76,7 +79,13 @@ public class ConsumerMain {
         if (pollers != null || consumers != null) {
             throw new IllegalStateException("threads already started");
         }
-        BlockingQueue<SQSMessage> queue = new LinkedBlockingDeque<SQSMessage>(100000);
+        final BlockingQueue<SQSMessage> queue = new LinkedBlockingDeque<SQSMessage>(100000);
+        metricRegistry.register(Constants.GAUGE_CONSUMER_QUEUE_SIZE, new Gauge<Integer>() {
+            @Override
+            public Integer getValue() {
+                return queue.size();
+            }
+        });
 
         pollers = new ArrayList<MessagePoller>(opts.getWorkerPool());
         for (int i = 0; i < opts.getWorkerPool(); i++) {

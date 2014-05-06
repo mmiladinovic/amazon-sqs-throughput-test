@@ -8,6 +8,7 @@ package com.mmiladinovic.sqs.consumer;
  * To change this template use File | Settings | File Templates.
  */
 public class SQSMessage {
+
     private final String messageBody;
     private final String messageHandle;
 

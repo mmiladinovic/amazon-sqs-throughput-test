@@ -19,7 +19,6 @@ import java.util.TimeZone;
 public class SimpleMessage implements Serializable {
 
     private static final long serialVersionUID = 1896180568594719315L;
-    private static final Calendar cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
 
     private final String objectId;
     private final String userId;
@@ -28,7 +27,7 @@ public class SimpleMessage implements Serializable {
     public SimpleMessage(String objectId, String userId) {
         this.objectId = objectId;
         this.userId = userId;
-        timeGenerated = cal.getTimeInMillis();
+        timeGenerated = System.currentTimeMillis();
     }
 
     @JsonProperty

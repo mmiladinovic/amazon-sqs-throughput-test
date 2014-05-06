@@ -5,11 +5,14 @@ import com.amazonaws.services.sqs.model.Message;
 import com.amazonaws.services.sqs.model.ReceiveMessageRequest;
 import com.amazonaws.services.sqs.model.ReceiveMessageResult;
 import com.codahale.metrics.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mmiladinovic.sqs.Constants;
+import com.mmiladinovic.sqs.SimpleMessage;
 import com.mmiladinovic.sqs.producer.MessageSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
@@ -26,6 +29,8 @@ import static com.codahale.metrics.MetricRegistry.name;
 public class MessagePoller implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(MessageSender.class);
 
+    private final ObjectMapper mapper = new ObjectMapper();
+
     private final BlockingQueue<SQSMessage> receiveQueue;
     private final String queueUrl;
     private final AmazonSQSClient sqs;
@@ -33,6 +38,7 @@ public class MessagePoller implements Runnable {
     private final Meter messagePollerMeter;
     private final Counter messageErrorsCounter;
     private final Timer sqsReceiveTimer;
+    private final Histogram latencyAcrossSQSHistogram;
 
     private volatile boolean cancelled;
 
@@ -44,12 +50,7 @@ public class MessagePoller implements Runnable {
         messagePollerMeter = metricRegistry.meter(Constants.METER_POLLER_MESSAGES_POLLED);
         sqsReceiveTimer = metricRegistry.timer(Constants.TIMER_POLLER_SQS_RECEIVE);
         messageErrorsCounter = metricRegistry.counter(Constants.COUNTER_POLLER_SQS_RECEIVE_ERROR);
-        metricRegistry.register(name(MessagePoller.class, Constants.GAUGE_CONSUMER_QUEUE_SIZE), new Gauge<Integer>() {
-            @Override
-            public Integer getValue() {
-                return receiveQueue.size();
-            }
-        });
+        latencyAcrossSQSHistogram = metricRegistry.histogram(Constants.HISTOGRAM_MESSAGE_LATENCY_ACROSS_SQS);
     }
 
     @Override
@@ -68,7 +69,6 @@ public class MessagePoller implements Runnable {
         }
     }
 
-
     private List<SQSMessage> pollBatchFromSQS() {
         ReceiveMessageResult r = null;
         Timer.Context timer = sqsReceiveTimer.time();
@@ -81,9 +81,17 @@ public class MessagePoller implements Runnable {
         finally {
             timer.stop();
         }
+        long now = System.currentTimeMillis();
         List<SQSMessage> retval = new ArrayList<SQSMessage>(r.getMessages().size());
         for (Message m : r.getMessages()) {
-            retval.add(new SQSMessage(m.getBody(), m.getReceiptHandle()));
+            try {
+                long timeGenerated = mapper.readTree(m.getBody()).findValue("timeGenerated").asLong();
+                long latency = now - timeGenerated;
+                latencyAcrossSQSHistogram.update(latency);
+                retval.add(new SQSMessage(m.getBody(), m.getReceiptHandle()));
+            } catch (IOException e) {
+                logger.error("problem", e);
+            }
         }
         return retval;
     }
